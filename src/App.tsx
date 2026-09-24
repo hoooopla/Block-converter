@@ -79,7 +79,6 @@ const blockKinds: BlockKind[] = ['document', 'section', 'subsection', 'definitio
 
 function InlineBlock({ block, draft, depth, activeId, activate, change, rename }: { block: DraftBlock; draft: ConversionDraft; depth: number; activeId: string | null; activate: (id: string) => void; change: (id: string, value: Partial<DraftBlock>) => void; rename: (id: string, label: string) => void }) {
   const [label, setLabel] = useState(block.label);
-  const [folded, setFolded] = useState(false);
   useEffect(() => setLabel(block.label), [block.label]);
   const children = draft.blocks.filter(candidate => candidate.parentId === block.id);
   const pieces = block.content.split(/(\[\[[^\]\n]+∨\]\])/g);
@@ -91,15 +90,15 @@ function InlineBlock({ block, draft, depth, activeId, activate, change, rename }
     change(block.id, { content: next.join('') });
   };
   return <section className={`inline-block depth-${Math.min(depth, 3)}${activeId === block.id ? ' active' : ''}`}>
-    <div className="inline-boundary"><button className="inline-fold" aria-label={`${folded ? 'Expand' : 'Fold'} ${block.title}`} onClick={() => { activate(block.id); setFolded(!folded); }}>{folded ? '▸' : '▾'}</button><div className="inline-fields"><select className="inline-kind-edit" aria-label={`Kind of ${block.title}`} title={`Block kind · ${block.id}`} value={block.kind} onFocus={() => activate(block.id)} onChange={event => change(block.id, { kind: event.target.value as BlockKind })}>{blockKinds.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select><input className="inline-title-edit" aria-label={`Title of ${block.kind}`} title="Block title" value={block.title} size={Math.max(8, Math.min(block.title.length + 1, 42))} onFocus={() => activate(block.id)} onChange={event => change(block.id, { title: event.target.value })} /><input className="inline-label-edit" aria-label={`Label of ${block.title}`} title="Block label · press Enter or leave the field to update references" value={label} size={Math.max(12, Math.min(label.length + 1, 56))} onFocus={() => activate(block.id)} onChange={event => setLabel(event.target.value)} onBlur={() => rename(block.id, label)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} /></div></div>
-    {!folded && <><div className="inline-scope">{pieces.map((piece, index) => {
+    <div className="inline-boundary"><div className="inline-fields"><select className="inline-kind-edit" aria-label={`Kind of ${block.title}`} title={`Block kind · ${block.id}`} value={block.kind} onFocus={() => activate(block.id)} onChange={event => change(block.id, { kind: event.target.value as BlockKind })}>{blockKinds.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select><input className="inline-title-edit" aria-label={`Title of ${block.kind}`} title="Block title" value={block.title} size={Math.max(8, Math.min(block.title.length + 1, 42))} onFocus={() => activate(block.id)} onChange={event => change(block.id, { title: event.target.value })} /><input className="inline-label-edit" aria-label={`Label of ${block.title}`} title="Block label · press Enter or leave the field to update references" value={label} size={Math.max(12, Math.min(label.length + 1, 56))} onFocus={() => activate(block.id)} onChange={event => setLabel(event.target.value)} onBlur={() => rename(block.id, label)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} /></div></div>
+    <div className="inline-scope">{pieces.map((piece, index) => {
         const match = piece.match(/^\[\[([^\]\n]+)∨\]\]$/);
         if (match) {
           const child = children.find(candidate => candidate.label === match[1]);
           return child ? <InlineBlock key={child.id} block={child} draft={draft} depth={depth + 1} activeId={activeId} activate={activate} change={change} rename={rename} /> : <textarea key={index} className="inline-text" aria-label={`${block.title} Markdown`} value={piece.trim()} onFocus={() => activate(block.id)} onChange={event => editPiece(index, event.target.value)} spellCheck={false} />;
         }
         return piece.trim() ? <textarea key={index} className="inline-text" aria-label={`${block.title} Markdown`} value={piece.replace(/^\n+|\n+$/g, '')} onFocus={() => activate(block.id)} onChange={event => editPiece(index, event.target.value)} spellCheck={false} /> : null;
-      })}{children.filter(child => !block.content.includes(`[[${child.label}∨]]`)).map(child => <InlineBlock key={child.id} block={child} draft={draft} depth={depth + 1} activeId={activeId} activate={activate} change={change} rename={rename} />)}</div></>}
+      })}{children.filter(child => !block.content.includes(`[[${child.label}∨]]`)).map(child => <InlineBlock key={child.id} block={child} draft={draft} depth={depth + 1} activeId={activeId} activate={activate} change={change} rename={rename} />)}</div>
   </section>;
 }
 

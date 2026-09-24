@@ -51,7 +51,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .inline-meta summary .inline-label{text-transform:none;color:#8fae98;font:10px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;max-width:min(42vw,480px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .combined-document{padding-left:clamp(38px,5vw,70px);padding-right:clamp(18px,4vw,48px)}
 .inline-block,.inline-scope>.inline-block{margin:0 0 12px}
-.inline-boundary{margin-left:-25px;gap:2px}
+.inline-boundary{margin-left:0;gap:2px}
 .inline-fold{width:21px;padding:0;color:#8eaa94}
 .inline-meta summary{border:0;background:transparent;color:#c7ddcc;padding:3px 5px;font-weight:600}
 .inline-meta summary span{color:#8fae97}
@@ -64,7 +64,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .inline-scope{border-left:2px solid #4e6e57;margin:1px 0 0 8px;padding:0 0 2px 8px}
 .inline-block.active>.inline-scope{box-shadow:none;border-color:#96cba1;margin:1px 0 0 8px;padding:0 0 2px 8px}
 .inline-fields{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 9px;min-width:0}
-.inline-fields select,.inline-fields input{border:1px solid transparent;border-radius:3px;background:transparent;color:#dce9df;padding:2px 3px;min-width:0}
+.inline-fields select,.inline-fields input{border:1px solid #4b6351;border-radius:3px;background:transparent;color:#dce9df;padding:2px 3px;min-width:0}
 .inline-fields select:focus,.inline-fields input:focus{outline:none;border-color:#76ad82;background:#26372a}
 .inline-kind-edit{color:#9bbda3!important;text-transform:uppercase;font-size:10px;cursor:pointer}
 .inline-title-edit{font:600 13px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;max-width:45vw}
