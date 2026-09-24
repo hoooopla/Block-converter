@@ -66,7 +66,8 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .inline-fields{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 3px;min-width:0}
 .inline-fields select,.inline-fields input{border:1px solid #4b6351;border-radius:3px;background:transparent;color:#dce9df;padding:2px 3px;min-width:0}
 .inline-fields select:focus,.inline-fields input:focus{outline:none;border-color:#76ad82;background:#26372a}
-.inline-kind-edit{color:#9bbda3!important;text-transform:uppercase;font:13px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;cursor:pointer}
+.inline-fields .inline-kind-edit{border-color:#344b3a;background:#1a261d;color:#88a891;text-transform:lowercase;font:13px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;cursor:pointer}
+.inline-fields .inline-kind-edit:hover,.inline-fields .inline-kind-edit:focus{border-color:#76ad82;color:#dce9df}
 .inline-title-edit{font:600 13px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;max-width:45vw}
 .inline-label-edit{color:#9bb5a1!important;font:13px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;max-width:55vw;text-overflow:ellipsis}
 .inline-scope{margin-left:4px;padding-left:4px}
