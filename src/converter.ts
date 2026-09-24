@@ -356,6 +356,30 @@ export function blockMarkdown(block: DraftBlock): string {
   return `---\nid: ${block.id}\ntitle: ${JSON.stringify(block.title)}\nlabel: ${JSON.stringify(block.label)}\n---\n${block.content}\n`;
 }
 
+export function parseBlockMarkdown(text: string, expectedId: string): Pick<DraftBlock, 'title' | 'label' | 'content'> {
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const match = normalized.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!match) throw new Error('Keep the opening and closing --- front-matter lines.');
+  const fields = new Map<string, string>();
+  for (const line of match[1].split('\n')) {
+    const field = line.match(/^([a-z]+):\s*(.*)$/);
+    if (!field) throw new Error(`Invalid front-matter line: ${line}`);
+    if (!['id', 'title', 'label'].includes(field[1]) || fields.has(field[1])) throw new Error(`Unsupported or repeated field: ${field[1]}.`);
+    fields.set(field[1], field[2]);
+  }
+  if (fields.get('id') !== expectedId) throw new Error(`The file ID must remain ${expectedId}.`);
+  let title: unknown;
+  let label: unknown;
+  try {
+    title = JSON.parse(fields.get('title') || '');
+    label = JSON.parse(fields.get('label') || '');
+  } catch { throw new Error('Title and label must be quoted JSON strings.'); }
+  if (typeof title !== 'string' || !title.trim() || typeof label !== 'string' || !label.trim()) {
+    throw new Error('Title and label must be nonempty strings.');
+  }
+  return { title, label, content: match[2].replace(/\n$/, '') };
+}
+
 export function validateDraft(draft: ConversionDraft): Diagnostic[] {
   const diagnostics = [...draft.diagnostics];
   const labels = new Set<string>();

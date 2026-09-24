@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assetOutputPath, blockMarkdown, convertProject, renameLabel, validateDraft } from './converter';
+import { assetOutputPath, blockMarkdown, convertProject, parseBlockMarkdown, renameLabel, validateDraft } from './converter';
 import { makeWorkspaceArchive } from './export';
 import JSZip from 'jszip';
 import { parseIntermediate, serializeIntermediate } from './intermediate';
@@ -109,4 +109,14 @@ test('flags TeX constructs that need manual review in a complex document', () =>
   assert.ok(messages.some(message => message.includes('Diagram needs')));
   assert.ok(messages.some(message => message.includes('Citation needs')));
   assert.ok(messages.some(message => message.includes('Unresolved reference: eq:one')));
+});
+
+test('parses edits to an exported block file without changing its ID', () => {
+  const draft = convertProject([{ path: 'main.tex', text: String.raw`\title{Notes}\begin{document}Original.\end{document}` }], 'main.tex');
+  const original = draft.blocks[0];
+  const edited = blockMarkdown(original).replace('title: "Notes"', 'title: "New title"').replace('Original.', 'Revised $x^2$.');
+  assert.deepEqual(parseBlockMarkdown(edited, original.id), { title: 'New title', label: original.label, content: 'Revised $x^2$.' });
+  assert.throws(() => parseBlockMarkdown(edited.replace('id: block-1', 'id: block-9'), original.id), /file ID must remain/);
+  assert.throws(() => parseBlockMarkdown(edited.replace('title: "New title"', 'title: New title'), original.id), /quoted JSON strings/);
+  assert.throws(() => parseBlockMarkdown(edited.replace('id: block-1', 'id: block-1\nkind: theorem'), original.id), /Unsupported or repeated field/);
 });
