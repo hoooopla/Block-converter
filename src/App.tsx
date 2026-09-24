@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { ArrowDownToLine, ArrowRight, BookOpen, Check, FileText, FolderOpen, LoaderCircle, Play, Upload, AlertCircle } from 'lucide-react';
-import { assetOutputPath, blockMarkdown, convertProject, renameLabel, validateDraft, type ConversionDraft, type DraftBlock, type SourceFile } from './converter';
+import { assetOutputPath, blockMarkdown, convertProject, renameLabel, validateDraft, type BlockKind, type ConversionDraft, type DraftBlock, type SourceFile } from './converter';
 import { serializeIntermediate, parseIntermediate } from './intermediate';
 import { compilePdf } from './compile';
 import { downloadWorkspace, settingsJson } from './export';
@@ -75,6 +75,46 @@ function Article({ block, draft, assets, select, depth = 0 }: { block: DraftBloc
   </section>;
 }
 
+const blockKinds: BlockKind[] = ['document', 'section', 'subsection', 'definition', 'lemma', 'proposition', 'theorem', 'corollary', 'proof', 'example', 'remark', 'exercise'];
+
+function blockScope(text: string, id: string): [number, number] | null {
+  const stack: Array<{ id: string; start: number }> = [];
+  let offset = 0;
+  for (const line of text.split('\n')) {
+    if (line.startsWith('<!-- block:start ')) {
+      try { stack.push({ id: JSON.parse(line.slice(17, -4)).id, start: offset }); } catch { /* Raw text may be mid-edit. */ }
+    } else if (line === '<!-- block:end -->') {
+      const open = stack.pop();
+      if (open?.id === id) return [open.start, offset + line.length];
+    }
+    offset += line.length + 1;
+  }
+  return null;
+}
+
+function BlockScope({ block, draft, depth, highlight, change, rename }: { block: DraftBlock; draft: ConversionDraft; depth: number; highlight: (id: string) => void; change: (id: string, value: Partial<DraftBlock>) => void; rename: (id: string, label: string) => void }) {
+  const [label, setLabel] = useState(block.label);
+  useEffect(() => setLabel(block.label), [block.label]);
+  const children = draft.blocks.filter(candidate => candidate.parentId === block.id);
+  const pieces = block.content.split(/(\[\[[^\]\n]+∨\]\])/g);
+  return <details className="scope-block" open={depth < 3}>
+    <summary><span className="scope-kind">{block.kind}</span><strong>{block.title}</strong><span className="scope-id">{block.id}</span></summary>
+    <div className="scope-body">
+      <div className="scope-fields"><label>Kind<select value={block.kind} onChange={event => change(block.id, { kind: event.target.value as BlockKind })}>{blockKinds.map(kind => <option key={kind} value={kind}>{kind}</option>)}</select></label><label>Title<input value={block.title} onChange={event => change(block.id, { title: event.target.value })} /></label><label>Label<input value={label} onChange={event => setLabel(event.target.value)} onBlur={() => rename(block.id, label)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} /></label></div>
+      <button className="scope-highlight" onClick={() => highlight(block.id)}>Highlight full scope in Markdown</button>
+      <div className="scope-content">{pieces.map((piece, index) => {
+        const match = piece.match(/^\[\[([^\]\n]+)∨\]\]$/);
+        if (match) {
+          const child = children.find(candidate => candidate.label === match[1]);
+          return child ? <BlockScope key={child.id} block={child} draft={draft} depth={depth + 1} highlight={highlight} change={change} rename={rename} /> : <pre key={index}>{piece}</pre>;
+        }
+        return piece.trim() ? <pre key={index}>{piece.trim()}</pre> : null;
+      })}{children.filter(child => !block.content.includes(`[[${child.label}∨]]`)).map(child => <BlockScope key={child.id} block={child} draft={draft} depth={depth + 1} highlight={highlight} change={change} rename={rename} />)}</div>
+      <div className="scope-end">End {block.kind} · {block.id}</div>
+    </div>
+  </details>;
+}
+
 export default function App() {
   const [stage, setStage] = useState(1);
   const [files, setFiles] = useState<SourceFile[]>(initialFiles);
@@ -93,6 +133,7 @@ export default function App() {
   const [exporting, setExporting] = useState(false);
   const filePicker = useRef<HTMLInputElement>(null);
   const folderPicker = useRef<HTMLInputElement>(null);
+  const combinedEditor = useRef<HTMLTextAreaElement>(null);
   const sourceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const combinedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pdfUrlRef = useRef('');
@@ -160,6 +201,23 @@ export default function App() {
     setCombinedPending(false);
     setLabelInput(next.blocks.find(block => block.id === selected.id)?.label || selected.label);
   }
+  function renameScope(id: string, label: string) {
+    const next = renameLabel(draft, id, label);
+    setDraft(next);
+    setCombined(serializeIntermediate(next));
+    setCombinedError('');
+    setCombinedPending(false);
+    if (id === selectedId) setLabelInput(next.blocks.find(block => block.id === id)?.label || label);
+  }
+  function highlightScope(id: string) {
+    const range = blockScope(combined, id);
+    const editor = combinedEditor.current;
+    if (!range || !editor) return;
+    editor.focus();
+    editor.setSelectionRange(...range);
+    const line = combined.slice(0, range[0]).split('\n').length - 1;
+    editor.scrollTop = Math.max(0, line * 20 - editor.clientHeight / 3);
+  }
   function selectBlock(id: string) {
     const found = draft.blocks.find(block => block.id === id);
     if (!found) return;
@@ -226,7 +284,7 @@ export default function App() {
       <div className="heading"><div><span className="eyebrow">STAGE {stage} OF 5</span><h1>{stageInfo.title}</h1><p>{stageInfo.sub}. Changes in an earlier stage update the stages that follow.</p></div><div className="heading-actions"><span className="count">{draft.blocks.length} blocks · {issues.length} issues</span>{stage < 5 && <button className="next" onClick={() => setStage(stage + 1)}>Next <ArrowRight size={15} /></button>}</div></div>
       {stage === 1 && <div className="panes"><section className="pane"><div className="pane-head"><strong>Original TeX</strong><span>Editable</span></div><div className="toolbar"><button onClick={() => filePicker.current?.click()}><Upload size={15} /> Choose files</button><button onClick={() => folderPicker.current?.click()}><FolderOpen size={15} /> Choose folder</button><input ref={filePicker} type="file" multiple accept=".tex,.bib,.png,.jpg,.jpeg,.gif,.svg,.webp,.pdf" hidden onChange={e => void importFiles(e.target.files)} /><input ref={folderPicker} type="file" multiple hidden onChange={e => void importFiles(e.target.files)} /></div><textarea className="codearea" aria-label="TeX source" value={source} onChange={e => changeSource(e.target.value)} spellCheck={false} placeholder="Paste a complete TeX document here…" /></section><section className="pane"><div className="pane-head"><strong>Project</strong><span>{files.length} files</span></div><div className="pane-content"><label className="file-select">Main TeX file<select value={mainPath} onChange={e => switchMain(e.target.value)}>{files.filter(file => file.text !== undefined).map(file => <option key={file.path} value={file.path}>{file.path}</option>)}</select></label><div className="file-list">{files.map(file => <div key={file.path}><FileText size={14} /><span>{file.path}</span></div>)}</div><h3>Detected blocks</h3>{blockList}</div></section></div>}
       {stage === 2 && <div className="panes"><section className="pane"><div className="pane-head"><strong>Original TeX</strong><span>Editable</span></div><textarea className="codearea" aria-label="TeX source" value={source} onChange={e => changeSource(e.target.value)} spellCheck={false} /></section><section className="pane"><div className="pane-head"><strong>Expected PDF</strong><span>{pdfStatus === 'ready' ? 'Compiled locally' : pdfStatus === 'stale' ? 'Source changed' : 'Browser TeX'}</span></div><div className="compile-bar"><button className="primary" disabled={pdfStatus === 'working'} onClick={() => void runCompile()}>{pdfStatus === 'working' ? <LoaderCircle className="spin" size={15} /> : <Play size={15} />} {pdfStatus === 'working' ? 'Compiling…' : pdfStatus === 'stale' ? 'Recompile PDF' : 'Compile PDF'}</button>{pdfUrl && <a href={pdfUrl} target="_blank" rel="noreferrer">Open PDF</a>}</div>{pdfStatus === 'working' && <p className="compile-status" role="status">Loading the TeX engine and compiling. The first run may take a while.</p>}{pdfUrl ? <PdfPages url={pdfUrl} /> : <div className="empty-pdf"><FileText size={34} /><strong>{pdfStatus === 'error' ? 'Compilation did not produce a PDF' : 'Compile to see the original layout'}</strong><p>The TeX engine runs in your browser. First use downloads its runtime files; conversion can continue if compilation fails.</p></div>}{pdfLog && <details className="log" open={pdfStatus === 'error'}><summary>Compilation log</summary><pre>{pdfLog.slice(-12000)}</pre></details>}</section></div>}
-      {stage === 3 && <div className="panes"><section className="pane"><div className="pane-head"><strong>Combined Markdown</strong><span>Editable intermediate</span></div><textarea className="codearea" aria-label="Combined Markdown" value={combined} onChange={e => changeCombined(e.target.value)} spellCheck={false} />{combinedError && <div className="inline-error"><AlertCircle size={15} />{combinedError}</div>}</section><section className="pane"><div className="pane-head"><strong>Reading order</strong><span>Settings → content → block boundaries</span></div><div className="pane-content"><p className="note">The settings comment comes first. Block comments define what will become individual files; the Markdown between them remains in its original position.</p><div className="settings"><strong>Math macros</strong><pre>{JSON.stringify(draft.macros, null, 2)}</pre></div><h3>Blocks</h3>{blockList}<p className="note">Edit the combined text on the left. A valid edit updates the block files and final view.</p></div></section></div>}
+      {stage === 3 && <div className="panes"><section className="pane"><div className="pane-head"><strong>Combined Markdown</strong><span>Editable source</span></div><textarea ref={combinedEditor} className="codearea" aria-label="Combined Markdown" value={combined} onChange={e => changeCombined(e.target.value)} spellCheck={false} />{combinedError && <div className="inline-error"><AlertCircle size={15} />{combinedError}</div>}</section><section className="pane"><div className="pane-head"><strong>Block scopes</strong><span>Reading order · foldable</span></div><div className="scope-list"><p className="note">Each outlined area is one block. Nested areas are child blocks; text after a child stays in its parent. Edit metadata here, or edit the combined Markdown on the left.</p><details className="settings-file"><summary>Settings · math macros</summary><pre>{JSON.stringify(draft.macros, null, 2)}</pre></details>{draft.blocks.filter(block => !block.parentId).map(block => <BlockScope key={block.id} block={block} draft={draft} depth={0} highlight={highlightScope} change={changeBlock} rename={renameScope} />)}</div></section></div>}
       {stage === 4 && <div className="panes"><section className="pane"><div className="pane-head"><strong>Block data</strong><span>{draft.blocks.length} files</span></div><div className="pane-content">{blockList}{blockEditor}</div></section><section className="pane"><div className="pane-head"><strong>Exported files</strong><span>All blocks in reading order</span></div><div className="all-files"><details className="settings-file"><summary>Settings · setting/settings.json</summary><pre>{settingsJson(draft)}</pre></details>{draft.blocks.map(block => <section className="exported-block" key={block.id}><div className="exported-block-head"><strong>{block.title}</strong><span>{block.kind} · {block.id}.md</span></div><div className="exported-label">{block.label}</div><pre>{blockMarkdown(block)}</pre></section>)}</div><div className="export-tree"><strong>Workspace ZIP</strong><span>{draft.blocks.length} block .md files</span><span>setting/settings.json</span>{draft.assets.map(file => <span key={file.path}>{assetOutputPath(file.path, draft.mainPath)}</span>)}</div></section></div>}
       {stage === 5 && <div className="panes"><section className="pane"><div className="pane-head"><strong>Selected block</strong><span>Editable Markdown</span></div><div className="pane-content">{blockList}{blockEditor}</div></section><section className="pane"><div className="pane-head"><strong>Continuous editor view</strong><span>Live preview</span></div><div className="article-scroll"><Article block={draft.blocks.find(block => block.id === draft.rootId) || draft.blocks[0]} draft={draft} assets={assets} select={selectBlock} /></div></section></div>}
       {issues.length > 0 && <details className="issues"><summary><AlertCircle size={15} /> Review {issues.length} conversion issue{issues.length === 1 ? '' : 's'}</summary><div>{issues.map((item, index) => <button key={index} onClick={() => item.blockId && selectBlock(item.blockId)}><strong>{item.level}</strong> {item.message}</button>)}</div></details>}
