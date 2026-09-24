@@ -63,7 +63,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .inline-block.active>.inline-end{display:block}
 .inline-scope{border-left:2px solid #4e6e57;margin:1px 0 0 8px;padding:0 0 2px 8px}
 .inline-block.active>.inline-scope{box-shadow:none;border-color:#96cba1;margin:1px 0 0 8px;padding:0 0 2px 8px}
-.inline-fields{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 9px;min-width:0}
+.inline-fields{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 3px;min-width:0}
 .inline-fields select,.inline-fields input{border:1px solid #4b6351;border-radius:3px;background:transparent;color:#dce9df;padding:2px 3px;min-width:0}
 .inline-fields select:focus,.inline-fields input:focus{outline:none;border-color:#76ad82;background:#26372a}
 .inline-kind-edit{color:#9bbda3!important;text-transform:uppercase;font:13px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;cursor:pointer}
