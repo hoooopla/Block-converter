@@ -80,3 +80,33 @@ test('combined Markdown preserves reading order and round-trips into the export 
   assert.equal(edited.blocks[0].content, draft.blocks[0].content);
   assert.equal(validateDraft(edited).length, 0);
 });
+
+test('round-trips nested sections, statements, proof, macros, and references', () => {
+  const tex = String.raw`\newcommand{\RR}{\mathbb{R}}\title{Long Notes}\begin{document}
+\section{First}\label{sec:first}Before.
+\subsection{Details}
+\begin{definition}[Compactness]\label{def:compact}A set $K\subset\RR$ is compact.\end{definition}
+\begin{theorem}[Bolzano]\label{thm:bolzano}See \ref{def:compact}.\end{theorem}
+\begin{proof}The claim follows.\end{proof}
+After \ref{thm:bolzano}.
+\section{Second}More.\end{document}`;
+  const draft = convertProject([{ path: 'main.tex', text: tex }], 'main.tex');
+  assert.deepEqual(draft.blocks.map(block => block.kind), ['document', 'section', 'subsection', 'definition', 'theorem', 'proof', 'section']);
+  assert.equal(draft.macros['\\RR'], '\\mathbb{R}');
+  assert.equal(draft.blocks[5].parentId, draft.blocks[4].id);
+  assert.match(draft.blocks[4].content, /\[\[long-notes\/sec-first\/details\/def-compact\]\]/);
+  assert.equal(validateDraft(draft).length, 0);
+  const parsed = parseIntermediate(serializeIntermediate(draft), draft);
+  assert.deepEqual(parsed.blocks.map(block => block.content), draft.blocks.map(block => block.content));
+});
+
+test('flags TeX constructs that need manual review in a complex document', () => {
+  const tex = String.raw`\title{Diagrams}\begin{document}\section*{Unnumbered}
+\begin{remark}A diagram: \begin{tikzcd}A\arrow[r]&B\end{tikzcd}. \cite{key}\end{remark}
+\begin{equation}\label{eq:one}x=1\end{equation}See \eqref{eq:one}.\end{document}`;
+  const draft = convertProject([{ path: 'main.tex', text: tex }], 'main.tex');
+  const messages = validateDraft(draft).map(issue => issue.message);
+  assert.ok(messages.some(message => message.includes('Diagram needs')));
+  assert.ok(messages.some(message => message.includes('Citation needs')));
+  assert.ok(messages.some(message => message.includes('Unresolved reference: eq:one')));
+});
