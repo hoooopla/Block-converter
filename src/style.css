@@ -37,3 +37,4 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .scope-highlight{margin:10px 0;border:1px solid #4b7555;border-radius:5px;background:#2d4934;color:#d9f3df;padding:7px 9px;font-size:10px;font-weight:700}.scope-highlight:hover{background:#3b6044}
 .scope-content{border-left:2px solid #62846a;margin:2px 0 0 4px;padding:3px 0 3px 12px}.scope-content pre{white-space:pre-wrap;overflow-wrap:anywhere;color:#d7e6da;font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin:8px 0}.scope-content .scope-block{margin-left:0}
 .scope-end{border-top:1px solid #3d5542;color:#9fbaa4;font:10px ui-monospace,monospace;margin-top:10px;padding:10px 1px}
+.all-files>.settings-file,.all-files>.exported-block{flex:none}
