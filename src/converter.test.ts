@@ -3,6 +3,7 @@ import test from 'node:test';
 import { assetOutputPath, blockMarkdown, convertProject, renameLabel, validateDraft } from './converter';
 import { makeWorkspaceArchive } from './export';
 import JSZip from 'jszip';
+import { parseIntermediate, serializeIntermediate } from './intermediate';
 
 test('converts a lemma, proof, and reference into ordered linked blocks', () => {
   const tex = String.raw`\title{Article name}\begin{document}
@@ -67,4 +68,15 @@ test('exports an importable workspace ZIP with settings, root blocks, and assets
   assert.equal(JSON.parse(await zip.file('setting/settings.json')!.async('string')).macros['\\R'], '\\mathbb{R}');
   assert.ok(zip.file('block-1--notes.md'));
   assert.deepEqual([...await zip.file('assets/figures/plot.png')!.async('uint8array')], [1, 2, 3]);
+});
+
+test('combined Markdown preserves reading order and round-trips into the export blocks', () => {
+  const draft = convertProject([{ path: 'main.tex', text: String.raw`\title{Article}\begin{document}Before\begin{lemma}[A]\label{lem:a}Inside\end{lemma}After \ref{lem:a}.\end{document}` }], 'main.tex');
+  const combined = serializeIntermediate(draft);
+  assert.ok(combined.indexOf('Before') < combined.indexOf('Inside'));
+  assert.ok(combined.indexOf('Inside') < combined.indexOf('After'));
+  const edited = parseIntermediate(combined.replace('Inside', 'Edited inside'), draft);
+  assert.equal(edited.blocks[1].content, 'Edited inside');
+  assert.equal(edited.blocks[0].content, draft.blocks[0].content);
+  assert.equal(validateDraft(edited).length, 0);
 });

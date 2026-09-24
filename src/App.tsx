@@ -3,219 +3,228 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { ArrowDownToLine, ArrowRight, BookOpen, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Code2, FileArchive, FileText, FolderOpen, Link2, PencilLine, RefreshCw, UploadCloud, WandSparkles, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, BookOpen, Check, FileText, FolderOpen, LoaderCircle, Play, Upload, AlertCircle } from 'lucide-react';
 import { assetOutputPath, blockMarkdown, convertProject, renameLabel, validateDraft, type ConversionDraft, type DraftBlock, type SourceFile } from './converter';
-import { downloadWorkspace } from './export';
+import { serializeIntermediate, parseIntermediate } from './intermediate';
+import { compilePdf } from './compile';
+import { downloadWorkspace, settingsJson } from './export';
+import PdfPages from './PdfPages';
 
-const sample = String.raw`\documentclass{article}
-\usepackage{amsmath}
+const example = String.raw`\documentclass{article}
+\usepackage{amsmath,amssymb,amsthm}
+\newtheorem{lemma}{Lemma}
 \newcommand{\R}{\mathbb{R}}
 \title{Foundations of Analysis}
 \begin{document}
 \maketitle
-This article begins with a simple observation about sequences in $\R$.
+An article about sequences in $\R$.
 
 \section{Convergence}
-Let $(a_n)$ be a real sequence. We say it converges when its terms approach one value.
-
-\begin{definition}[Limit]\label{def:limit}
-The sequence $(a_n)$ converges to $L$ if, for every $\varepsilon>0$, there is an $N$ such that
-\[
-  n \ge N \implies |a_n-L| < \varepsilon.
-\]
-\end{definition}
+Let $(a_n)$ be a real sequence.
 
 \begin{lemma}[Uniqueness of limits]\label{lem:unique}
-A sequence in $\R$ has at most one limit.
+A sequence has at most one limit.
 \end{lemma}
-
 \begin{proof}
-Suppose $a_n$ converges to both $L$ and $M$. By \ref{def:limit}, choose $N$ so that both errors are smaller than $\varepsilon/2$. Then
-\begin{align*}
-|L-M| &\le |L-a_n| + |a_n-M| \\
-      &< \varepsilon.
-\end{align*}
+If $a_n\to L$ and $a_n\to M$, then
+\[
+|L-M|\leq |L-a_n|+|a_n-M|\to 0.
+\]
 Hence $L=M$.
 \end{proof}
 
-The conclusion of \ref{lem:unique} will be used throughout the article.
+We will use \ref{lem:unique} later.
 \end{document}`;
+const initialFiles: SourceFile[] = [{ path: 'main.tex', text: example }];
+const initialDraft = convertProject(initialFiles, 'main.tex');
+const stages = [
+  { title: 'Source', sub: 'Upload or paste TeX' },
+  { title: 'Original PDF', sub: 'Compile and compare' },
+  { title: 'Combined Markdown', sub: 'Review the conversion' },
+  { title: 'Block files', sub: 'Check the export' },
+  { title: 'Editor view', sub: 'Read the result' },
+] as const;
+const fileType = (path: string) => ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' })[path.split('.').at(-1)?.toLowerCase() as 'png'] || 'application/octet-stream';
 
-const sampleFiles: SourceFile[] = [{ path: 'foundations.tex', text: sample }];
-const formatKind = (kind: DraftBlock['kind']) => kind === 'document' ? 'Document' : kind[0].toUpperCase() + kind.slice(1);
-const mimeFor = (path: string) => ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' })[path.split('.').at(-1)?.toLowerCase() as 'png'] || 'application/octet-stream';
-
-function PreviewMarkdown({ markdown, draft, assetUrls, onSelect }: { markdown: string; draft: ConversionDraft; assetUrls: Record<string, string>; onSelect: (id: string) => void }) {
-  const labels = new Map(draft.blocks.map(block => [block.label, block]));
-  const linked = markdown.replace(/\[\[([^\]\n]+)\]\]/g, (match, inner: string) => {
-    const [rawLabel, alias] = inner.replace(/^@/, '').split('||').map(value => value.trim());
-    const target = labels.get(rawLabel);
-    return target ? `[${alias || target.title}](block:${encodeURIComponent(target.label)})` : match;
+function Markdown({ content, draft, assets, select }: { content: string; draft: ConversionDraft; assets: Record<string, string>; select: (id: string) => void }) {
+  const byLabel = new Map(draft.blocks.map(block => [block.label, block]));
+  const linked = content.replace(/\[\[([^\]\n]+)\]\]/g, (whole, raw: string) => {
+    const label = raw.replace(/∨$/, '').replace(/^@/, '').split('||')[0].trim();
+    const target = byLabel.get(label);
+    return target ? `[${target.title}](block:${encodeURIComponent(label)})` : whole;
   });
-  const renderable = linked.replace(/\\\[\s*\n?([\s\S]*?)\n?\s*\\\]/g, (_all, math: string) => `\n$$\n${math.trim()}\n$$\n`);
-  return <ReactMarkdown
-    remarkPlugins={[remarkGfm, remarkMath]}
-    rehypePlugins={[[rehypeKatex, { macros: draft.macros, throwOnError: false, strict: 'ignore' }]]}
-    urlTransform={url => url.startsWith('block:') ? url : defaultUrlTransform(url)}
-    components={{
-      a: ({ href, children }) => {
-        if (href?.startsWith('block:')) {
-          const label = decodeURIComponent(href.slice(6));
-          const target = labels.get(label);
-          return <button className="inline-link" onClick={() => target && onSelect(target.id)} title={label}><Link2 size={12} />{children}</button>;
-        }
-        return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
-      },
-      img: ({ src, alt }) => <img className="preview-image" src={assetUrls[src || ''] || src} alt={alt || ''} />
-    }}
-  >{renderable}</ReactMarkdown>;
+  const math = linked.replace(/\\\[\s*\n?([\s\S]*?)\n?\s*\\\]/g, (_whole, value: string) => `\n$$\n${value.trim()}\n$$\n`);
+  return <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { macros: draft.macros, throwOnError: false, strict: 'ignore' }]]} urlTransform={url => url.startsWith('block:') ? url : defaultUrlTransform(url)} components={{
+    a: ({ href, children }) => href?.startsWith('block:') ? <button className="text-link" onClick={() => { const block = byLabel.get(decodeURIComponent(href.slice(6))); if (block) select(block.id); }}>{children}</button> : <a href={href} target="_blank" rel="noreferrer">{children}</a>,
+    img: ({ src, alt }) => <img src={assets[src || ''] || src} alt={alt || ''} />,
+  }}>{math}</ReactMarkdown>;
 }
 
-function ContinuousBlock({ block, draft, assetUrls, selectedId, onSelect, depth = 0 }: { block: DraftBlock; draft: ConversionDraft; assetUrls: Record<string, string>; selectedId: string; onSelect: (id: string) => void; depth?: number }) {
-  const pieces = block.content.split(/(\[\[[^\]\n]+∨\]\])/g);
-  return <section className={`preview-block depth-${Math.min(depth, 3)} ${selectedId === block.id ? 'selected' : ''}`} id={`preview-${block.id}`}>
-    <div className="preview-block-head">
-      <button onClick={() => onSelect(block.id)} className="block-title-button"><span className="kind-dot" />{block.title}</button>
-      <span className="block-type">{formatKind(block.kind)}</span>
-      <code>{block.label}</code>
-    </div>
-    <div className="preview-body">
-      {pieces.map((piece, index) => {
-        const open = piece.match(/^\[\[([^\]\n]+)∨\]\]$/);
-        if (open) {
-          const label = open[1].replace(/^@/, '').split('||')[0].trim();
-          const child = draft.blocks.find(candidate => candidate.label === label);
-          return child && depth < 20
-            ? <ContinuousBlock key={`${child.id}-${index}`} block={child} draft={draft} assetUrls={assetUrls} selectedId={selectedId} onSelect={onSelect} depth={depth + 1} />
-            : <p className="missing-reference" key={index}>Unresolved embedded block: {label}</p>;
-        }
-        return piece.trim() ? <PreviewMarkdown key={index} markdown={piece} draft={draft} assetUrls={assetUrls} onSelect={onSelect} /> : null;
-      })}
-    </div>
+function Article({ block, draft, assets, select, depth = 0 }: { block: DraftBlock; draft: ConversionDraft; assets: Record<string, string>; select: (id: string) => void; depth?: number }) {
+  const segments = block.content.split(/(\[\[[^\]\n]+∨\]\])/g);
+  return <section className={`article-block depth-${Math.min(depth, 3)}`} id={`block-${block.id}`}>
+    <button className="article-heading" onClick={() => select(block.id)}><span>{block.title}</span><small>{block.kind}</small></button>
+    {segments.map((segment, i) => {
+      const match = segment.match(/^\[\[([^\]\n]+)∨\]\]$/);
+      if (match) {
+        const child = draft.blocks.find(candidate => candidate.label === match[1]);
+        return child && depth < 20 ? <Article key={`${child.id}-${i}`} block={child} draft={draft} assets={assets} select={select} depth={depth + 1} /> : <p className="issue" key={i}>Missing block: {match[1]}</p>;
+      }
+      return segment.trim() ? <Markdown key={i} content={segment} draft={draft} assets={assets} select={select} /> : null;
+    })}
   </section>;
 }
 
 export default function App() {
-  const [files, setFiles] = useState<SourceFile[]>(sampleFiles);
-  const [mainPath, setMainPath] = useState('foundations.tex');
-  const [draft, setDraft] = useState<ConversionDraft>(() => convertProject(sampleFiles, 'foundations.tex'));
-  const [selectedId, setSelectedId] = useState('block-1');
-  const [labelInput, setLabelInput] = useState('foundations-of-analysis');
-  const [sourceView, setSourceView] = useState<'tex' | 'markdown'>('tex');
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [stage, setStage] = useState(1);
+  const [files, setFiles] = useState<SourceFile[]>(initialFiles);
+  const [mainPath, setMainPath] = useState('main.tex');
+  const [draft, setDraft] = useState(initialDraft);
+  const [combined, setCombined] = useState(() => serializeIntermediate(initialDraft));
+  const [combinedError, setCombinedError] = useState('');
+  const [combinedPending, setCombinedPending] = useState(false);
+  const [sourcePending, setSourcePending] = useState(false);
+  const [selectedId, setSelectedId] = useState(initialDraft.rootId);
+  const [fileView, setFileView] = useState<'block' | 'settings'>('block');
+  const [labelInput, setLabelInput] = useState(initialDraft.blocks[0].label);
+  const [pdfUrl, setPdfUrl] = useState('');
+  const [pdfLog, setPdfLog] = useState('');
+  const [pdfStatus, setPdfStatus] = useState<'idle' | 'working' | 'ready' | 'error' | 'stale'>('idle');
+  const [assets, setAssets] = useState<Record<string, string>>({});
   const [exporting, setExporting] = useState(false);
-  const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
-  const fileInput = useRef<HTMLInputElement>(null);
-  const folderInput = useRef<HTMLInputElement>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
+  const filePicker = useRef<HTMLInputElement>(null);
+  const folderPicker = useRef<HTMLInputElement>(null);
+  const sourceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const combinedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pdfUrlRef = useRef('');
+  const sourceVersion = useRef(0);
 
-  useEffect(() => { folderInput.current?.setAttribute('webkitdirectory', ''); }, []);
+  useEffect(() => { folderPicker.current?.setAttribute('webkitdirectory', ''); }, []);
+  useEffect(() => () => { if (pdfUrlRef.current) URL.revokeObjectURL(pdfUrlRef.current); }, []);
   useEffect(() => {
     const urls: Record<string, string> = {};
-    for (const asset of draft.assets) {
-      if (asset.bytes) urls[assetOutputPath(asset.path, draft.mainPath)] = URL.createObjectURL(new Blob([new Uint8Array(asset.bytes)], { type: mimeFor(asset.path) }));
-    }
-    setAssetUrls(urls);
+    for (const file of draft.assets) if (file.bytes) urls[assetOutputPath(file.path, draft.mainPath)] = URL.createObjectURL(new Blob([new Uint8Array(file.bytes)], { type: fileType(file.path) }));
+    setAssets(urls);
     return () => Object.values(urls).forEach(URL.revokeObjectURL);
   }, [draft.assets, draft.mainPath]);
 
   const selected = draft.blocks.find(block => block.id === selectedId) || draft.blocks[0];
-  const diagnostics = useMemo(() => validateDraft(draft), [draft]);
-  const errorCount = diagnostics.filter(item => item.level === 'error').length;
-  const warningCount = diagnostics.filter(item => item.level === 'warning').length;
-  const source = files.find(file => file.path === mainPath)?.text || draft.source;
+  const issues = useMemo(() => validateDraft(draft), [draft]);
+  const errors = issues.filter(item => item.level === 'error').length;
+  const source = files.find(file => file.path === mainPath)?.text || '';
+  const stageInfo = stages[stage - 1];
 
-  function selectBlock(id: string) {
-    const block = draft.blocks.find(candidate => candidate.id === id);
-    if (!block) return;
-    setSelectedId(id);
-    setLabelInput(block.label);
-    document.getElementById(`preview-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  function acceptDraft(next: ConversionDraft) {
+    if (combinedTimer.current) clearTimeout(combinedTimer.current);
+    setDraft(next);
+    setCombined(serializeIntermediate(next));
+    setCombinedError('');
+    setCombinedPending(false);
+    setSelectedId(next.rootId);
+    setLabelInput(next.blocks[0].label);
+    setSourcePending(false);
   }
-
-  function updateBlock(id: string, changes: Partial<DraftBlock>) {
-    setDraft(current => ({ ...current, blocks: current.blocks.map(block => block.id === id ? { ...block, ...changes } : block) }));
-  }
-
-  function commitLabel() {
-    setDraft(current => {
-      const next = renameLabel(current, selected.id, labelInput);
-      setLabelInput(next.blocks.find(block => block.id === selected.id)?.label || selected.label);
-      return next;
-    });
-  }
-
-  async function loadFiles(selectedFiles: FileList | null) {
-    if (!selectedFiles?.length) return;
-    const next = await Promise.all(Array.from(selectedFiles).map(async file => {
-      const path = file.webkitRelativePath || file.name;
-      return /\.tex$/i.test(file.name)
-        ? { path, text: await file.text() }
-        : { path, bytes: new Uint8Array(await file.arrayBuffer()) };
-    }));
-    const texFiles = next.filter(file => file.text !== undefined);
-    if (!texFiles.length) return;
-    const preferred = texFiles.find(file => /(?:main|article|paper)\.tex$/i.test(file.path)) || texFiles[0];
+  function changeSource(value: string) {
+    sourceVersion.current++;
+    setSourcePending(true);
+    const next = files.map(file => file.path === mainPath ? { ...file, text: value } : file);
     setFiles(next);
-    setMainPath(preferred.path);
-    const converted = convertProject(next, preferred.path);
-    setDraft(converted);
-    setSelectedId(converted.rootId);
-    setLabelInput(converted.blocks[0].label);
-    setSourceView('tex');
+    setPdfStatus(pdfUrl ? 'stale' : 'idle');
+    if (sourceTimer.current) clearTimeout(sourceTimer.current);
+    sourceTimer.current = setTimeout(() => acceptDraft(convertProject(next, mainPath)), 450);
   }
-
-  function runConversion(path = mainPath) {
-    const converted = convertProject(files, path);
-    setDraft(converted);
-    setSelectedId(converted.rootId);
-    setLabelInput(converted.blocks[0].label);
+  function changeCombined(value: string) {
+    setCombined(value);
+    setCombinedPending(true);
+    if (combinedTimer.current) clearTimeout(combinedTimer.current);
+    combinedTimer.current = setTimeout(() => {
+      try {
+        const next = parseIntermediate(value, draft);
+        setDraft(next);
+        setCombinedError('');
+      } catch (error) { setCombinedError(error instanceof Error ? error.message : 'Invalid combined Markdown.'); }
+      setCombinedPending(false);
+    }, 450);
   }
-
+  function changeBlock(id: string, change: Partial<DraftBlock>) {
+    const next = { ...draft, blocks: draft.blocks.map(block => block.id === id ? { ...block, ...change } : block) };
+    setDraft(next);
+    setCombined(serializeIntermediate(next));
+    setCombinedError('');
+    setCombinedPending(false);
+  }
+  function commitLabel() {
+    const next = renameLabel(draft, selected.id, labelInput);
+    setDraft(next);
+    setCombined(serializeIntermediate(next));
+    setCombinedError('');
+    setCombinedPending(false);
+    setLabelInput(next.blocks.find(block => block.id === selected.id)?.label || selected.label);
+  }
+  function selectBlock(id: string) {
+    const found = draft.blocks.find(block => block.id === id);
+    if (!found) return;
+    setSelectedId(id);
+    setLabelInput(found.label);
+    document.getElementById(`block-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  async function importFiles(list: FileList | null) {
+    if (!list?.length) return;
+    const next: SourceFile[] = await Promise.all(Array.from(list).map(async file => ({ path: file.webkitRelativePath || file.name, ...(/\.tex$/i.test(file.name) ? { text: await file.text() } : { bytes: new Uint8Array(await file.arrayBuffer()) }) })));
+    const tex = next.filter(file => file.text !== undefined);
+    if (!tex.length) return;
+    const main = tex.find(file => /(?:main|article|paper)\.tex$/i.test(file.path)) || tex[0];
+    if (sourceTimer.current) clearTimeout(sourceTimer.current);
+    setFiles(next);
+    sourceVersion.current++;
+    setMainPath(main.path);
+    acceptDraft(convertProject(next, main.path));
+    setPdfStatus('idle');
+    if (pdfUrlRef.current) URL.revokeObjectURL(pdfUrlRef.current);
+    pdfUrlRef.current = '';
+    setPdfUrl('');
+    setPdfLog('');
+    setStage(1);
+  }
+  function switchMain(path: string) {
+    if (sourceTimer.current) clearTimeout(sourceTimer.current);
+    sourceVersion.current++;
+    setMainPath(path);
+    acceptDraft(convertProject(files, path));
+    setPdfStatus(pdfUrl ? 'stale' : 'idle');
+  }
+  async function runCompile() {
+    const version = sourceVersion.current;
+    setPdfStatus('working');
+    setPdfLog('Loading the browser TeX engine and compiling…');
+    const result = await compilePdf(files, mainPath);
+    setPdfLog(result.log);
+    if (pdfUrlRef.current) URL.revokeObjectURL(pdfUrlRef.current);
+    pdfUrlRef.current = result.pdf ? URL.createObjectURL(result.pdf) : '';
+    setPdfUrl(pdfUrlRef.current);
+    setPdfStatus(version !== sourceVersion.current ? 'stale' : result.pdf ? 'ready' : 'error');
+  }
   async function exportZip() {
-    if (errorCount) { setShowDiagnostics(true); return; }
+    if (errors || combinedError || combinedPending || sourcePending) return;
     setExporting(true);
     try { await downloadWorkspace(draft); }
     finally { setExporting(false); }
   }
+  const blockList = <div className="block-list">{draft.blocks.map(block => <button key={block.id} className={block.id === selected.id ? 'selected' : ''} onClick={() => selectBlock(block.id)} style={{ paddingLeft: 12 + block.label.split('/').length * 10 }}><span>{block.title}</span><small>{block.kind}</small></button>)}</div>;
+  const blockEditor = <div className="block-editor"><div className="field-row"><label>Title<input value={selected.title} onChange={e => changeBlock(selected.id, { title: e.target.value })} /></label><label>Label<input value={labelInput} onChange={e => setLabelInput(e.target.value)} onBlur={commitLabel} onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()} /></label></div><label>Markdown content<textarea value={selected.content} onChange={e => changeBlock(selected.id, { content: e.target.value })} spellCheck={false} /></label></div>;
 
-  return <div className="app-shell">
-    <header className="topbar">
-      <div className="brand"><div className="brand-mark"><BookOpen size={21} strokeWidth={2.2} /></div><div><strong>Block Converter</strong><small>TeX to connected notes</small></div></div>
-      <div className="topbar-right"><span className="privacy-note"><CheckCircle2 size={15} /> Files stay in your browser</span><button className="export-button" onClick={exportZip} disabled={exporting || !!errorCount}><ArrowDownToLine size={17} />{exporting ? 'Preparing…' : 'Export workspace'}<span className="export-count">{draft.blocks.length}</span></button></div>
-    </header>
-
-    <div className="hero-strip"><div className="hero-copy"><span className="eyebrow"><span className="eyebrow-line" /> CONVERSION WORKSPACE</span><h1>From a document to<br /><em>connected ideas.</em></h1><p>Turn a TeX manuscript into reviewable blocks, keep every theorem in context, and export a ready-to-open Math Note workspace.</p></div><div className="hero-steps"><span><b>01</b> Import</span><ArrowRight size={15} /><span><b>02</b> Review</span><ArrowRight size={15} /><span><b>03</b> Export</span></div></div>
-
-    <main className="workspace">
-      <aside className="sidebar">
-        <div className="panel-heading"><span>PROJECT</span><span className="heading-line" /></div>
-        <div className="import-card" onClick={() => fileInput.current?.click()} role="button" tabIndex={0} onKeyDown={event => event.key === 'Enter' && fileInput.current?.click()}>
-          <div className="import-icon"><UploadCloud size={22} /></div><strong>Choose TeX files</strong><span>Main file, included files & images</span>
-          <input ref={fileInput} type="file" multiple accept=".tex,.png,.jpg,.jpeg,.gif,.svg,.webp,.pdf" onChange={event => void loadFiles(event.target.files)} hidden />
-        </div>
-        <button className="folder-import" onClick={() => folderInput.current?.click()}><FolderOpen size={15} /> Or choose a project folder</button>
-        <input ref={folderInput} type="file" multiple onChange={event => void loadFiles(event.target.files)} hidden />
-        <div className="file-field"><label htmlFor="main-file">MAIN FILE</label><div className="select-wrap"><FileText size={15} /><select id="main-file" value={mainPath} onChange={event => { setMainPath(event.target.value); runConversion(event.target.value); }}>{files.filter(file => file.text !== undefined).map(file => <option key={file.path} value={file.path}>{file.path}</option>)}</select><ChevronDown size={14} /></div></div>
-        <button className="reconvert" onClick={() => runConversion()}><RefreshCw size={14} /> Reconvert source</button>
-
-        <div className="panel-heading outline-heading"><span>BLOCK OUTLINE</span><span className="count-pill">{draft.blocks.length}</span></div>
-        <nav className="outline">{draft.blocks.map(block => <button key={block.id} className={`outline-item ${selectedId === block.id ? 'active' : ''}`} style={{ paddingLeft: 13 + (block.label.split('/').length - 1) * 13 }} onClick={() => selectBlock(block.id)}><span className="outline-node">{block.parentId ? <ChevronRight size={13} /> : <BookOpen size={13} />}</span><span className="outline-title">{block.title}</span></button>)}</nav>
-
-        <button className={`diagnostic-button ${errorCount ? 'has-errors' : ''}`} onClick={() => setShowDiagnostics(value => !value)}><CircleAlert size={16} /><span>Review issues</span><b>{errorCount + warningCount}</b></button>
-        {showDiagnostics && <div className="diagnostic-list">{diagnostics.length ? diagnostics.map((item, index) => <button key={index} onClick={() => item.blockId && selectBlock(item.blockId)} className={item.level}><strong>{item.level}</strong>{item.message}</button>) : <p>All labels and links look ready.</p>}</div>}
-      </aside>
-
-      <div className="main-area">
-        <div className="section-header"><div><span className="eyebrow small">REVIEW THE CONVERSION</span><h2>Your document, in context.</h2><p>The right side renders the proposed Markdown. Select a block to edit its title, label or content.</p></div><div className="status-chip"><span className="status-dot" />{errorCount ? `${errorCount} errors to fix` : `${draft.blocks.length} blocks ready`}</div></div>
-        <div className="comparison">
-          <div className="source-panel"><div className="pane-head"><div><Code2 size={16} /><strong>Source</strong></div><div className="pane-tabs"><button className={sourceView === 'tex' ? 'active' : ''} onClick={() => setSourceView('tex')}>TeX</button><button className={sourceView === 'markdown' ? 'active' : ''} onClick={() => setSourceView('markdown')}>Selected .md</button></div></div><div className="source-scroll"><div className="source-filename">{sourceView === 'tex' ? mainPath : `${selected.id}.md`}</div><pre>{sourceView === 'tex' ? source : blockMarkdown(selected)}</pre></div></div>
-          <div className="preview-panel"><div className="pane-head"><div><WandSparkles size={17} /><strong>Continuous preview</strong></div><span className="preview-badge"><span /> LIVE MARKDOWN</span></div><div className="preview-scroll" ref={previewRef}><ContinuousBlock block={draft.blocks[0]} draft={draft} assetUrls={assetUrls} selectedId={selectedId} onSelect={selectBlock} /><div className="preview-end">END OF DOCUMENT</div></div></div>
-        </div>
-
-        <div className="inspector"><div className="inspector-heading"><div className="inspector-icon"><PencilLine size={17} /></div><div><span>SELECTED BLOCK</span><h3>{selected.title}</h3></div><span className="inspector-kind">{formatKind(selected.kind)}</span></div><div className="inspector-fields"><label>Title<input value={selected.title} onChange={event => updateBlock(selected.id, { title: event.target.value })} /></label><label>Label<input value={labelInput} onChange={event => setLabelInput(event.target.value)} onBlur={commitLabel} onKeyDown={event => event.key === 'Enter' && event.currentTarget.blur()} /></label></div><label className="content-label">Markdown content<textarea value={selected.content} onChange={event => updateBlock(selected.id, { content: event.target.value })} spellCheck={false} /></label><div className="inspector-foot"><span>Open child links keep blocks visible in their original place.</span><button onClick={() => setSourceView('markdown')}><FileText size={14} /> View .md</button></div></div>
-      </div>
+  return <div className="app">
+    <header className="top"><div className="brand"><BookOpen size={21} /><div><strong>Block Converter</strong><span>TeX to connected notes</span></div></div><button className="export" disabled={!!errors || !!combinedError || combinedPending || sourcePending || exporting} onClick={() => void exportZip()}><ArrowDownToLine size={16} />{exporting ? 'Preparing…' : 'Export workspace'}</button></header>
+    <main>
+      <nav className="steps" aria-label="Conversion stages">{stages.map((item, index) => <button key={item.title} className={stage === index + 1 ? 'active' : ''} onClick={() => setStage(index + 1)}><span className="step-number">{index + 1}</span><span>{item.title}</span></button>)}</nav>
+      <div className="heading"><div><span className="eyebrow">STAGE {stage} OF 5</span><h1>{stageInfo.title}</h1><p>{stageInfo.sub}. Changes in an earlier stage update the stages that follow.</p></div><div className="heading-actions"><span className="count">{draft.blocks.length} blocks · {issues.length} issues</span>{stage < 5 && <button className="next" onClick={() => setStage(stage + 1)}>Next <ArrowRight size={15} /></button>}</div></div>
+      {stage === 1 && <div className="panes"><section className="pane"><div className="pane-head"><strong>Original TeX</strong><span>Editable</span></div><div className="toolbar"><button onClick={() => filePicker.current?.click()}><Upload size={15} /> Choose files</button><button onClick={() => folderPicker.current?.click()}><FolderOpen size={15} /> Choose folder</button><input ref={filePicker} type="file" multiple accept=".tex,.bib,.png,.jpg,.jpeg,.gif,.svg,.webp,.pdf" hidden onChange={e => void importFiles(e.target.files)} /><input ref={folderPicker} type="file" multiple hidden onChange={e => void importFiles(e.target.files)} /></div><textarea className="codearea" aria-label="TeX source" value={source} onChange={e => changeSource(e.target.value)} spellCheck={false} placeholder="Paste a complete TeX document here…" /></section><section className="pane"><div className="pane-head"><strong>Project</strong><span>{files.length} files</span></div><div className="pane-content"><label className="file-select">Main TeX file<select value={mainPath} onChange={e => switchMain(e.target.value)}>{files.filter(file => file.text !== undefined).map(file => <option key={file.path} value={file.path}>{file.path}</option>)}</select></label><div className="file-list">{files.map(file => <div key={file.path}><FileText size={14} /><span>{file.path}</span></div>)}</div><h3>Detected blocks</h3>{blockList}</div></section></div>}
+      {stage === 2 && <div className="panes"><section className="pane"><div className="pane-head"><strong>Original TeX</strong><span>Editable</span></div><textarea className="codearea" aria-label="TeX source" value={source} onChange={e => changeSource(e.target.value)} spellCheck={false} /></section><section className="pane"><div className="pane-head"><strong>Expected PDF</strong><span>{pdfStatus === 'ready' ? 'Compiled locally' : pdfStatus === 'stale' ? 'Source changed' : 'Browser TeX'}</span></div><div className="compile-bar"><button className="primary" disabled={pdfStatus === 'working'} onClick={() => void runCompile()}>{pdfStatus === 'working' ? <LoaderCircle className="spin" size={15} /> : <Play size={15} />} {pdfStatus === 'working' ? 'Compiling…' : pdfStatus === 'stale' ? 'Recompile PDF' : 'Compile PDF'}</button>{pdfUrl && <a href={pdfUrl} target="_blank" rel="noreferrer">Open PDF</a>}</div>{pdfUrl ? <PdfPages url={pdfUrl} /> : <div className="empty-pdf"><FileText size={34} /><strong>{pdfStatus === 'error' ? 'Compilation did not produce a PDF' : 'Compile to see the original layout'}</strong><p>The TeX engine runs in your browser. First use downloads its runtime files; conversion can continue if compilation fails.</p></div>}{pdfLog && <details className="log" open={pdfStatus === 'error'}><summary>Compilation log</summary><pre>{pdfLog.slice(-12000)}</pre></details>}</section></div>}
+      {stage === 3 && <div className="panes"><section className="pane"><div className="pane-head"><strong>Combined Markdown</strong><span>Editable intermediate</span></div><textarea className="codearea" aria-label="Combined Markdown" value={combined} onChange={e => changeCombined(e.target.value)} spellCheck={false} />{combinedError && <div className="inline-error"><AlertCircle size={15} />{combinedError}</div>}</section><section className="pane"><div className="pane-head"><strong>Reading order</strong><span>Settings → content → block boundaries</span></div><div className="pane-content"><p className="note">The settings comment comes first. Block comments define what will become individual files; the Markdown between them remains in its original position.</p><div className="settings"><strong>Math macros</strong><pre>{JSON.stringify(draft.macros, null, 2)}</pre></div><h3>Blocks</h3>{blockList}<p className="note">Edit the combined text on the left. A valid edit updates the block files and final view.</p></div></section></div>}
+      {stage === 4 && <div className="panes"><section className="pane"><div className="pane-head"><strong>Block data</strong><span>{draft.blocks.length} files</span></div><div className="pane-content">{blockList}{blockEditor}</div></section><section className="pane"><div className="pane-head"><strong>Exported file</strong><span>{fileView === 'block' ? `${selected.id}.md` : 'setting/settings.json'}</span></div><div className="file-tabs"><button className={fileView === 'block' ? 'active' : ''} onClick={() => setFileView('block')}>Selected block</button><button className={fileView === 'settings' ? 'active' : ''} onClick={() => setFileView('settings')}>Settings</button></div><pre className="file-preview">{fileView === 'block' ? blockMarkdown(selected) : settingsJson(draft)}</pre><div className="export-tree"><strong>Workspace ZIP</strong><span>{draft.blocks.length} block .md files</span><span>setting/settings.json</span>{draft.assets.map(file => <span key={file.path}>{assetOutputPath(file.path, draft.mainPath)}</span>)}</div></section></div>}
+      {stage === 5 && <div className="panes"><section className="pane"><div className="pane-head"><strong>Selected block</strong><span>Editable Markdown</span></div><div className="pane-content">{blockList}{blockEditor}</div></section><section className="pane"><div className="pane-head"><strong>Continuous editor view</strong><span>Live preview</span></div><div className="article-scroll"><Article block={draft.blocks.find(block => block.id === draft.rootId) || draft.blocks[0]} draft={draft} assets={assets} select={selectBlock} /></div></section></div>}
+      {issues.length > 0 && <details className="issues"><summary><AlertCircle size={15} /> Review {issues.length} conversion issue{issues.length === 1 ? '' : 's'}</summary><div>{issues.map((item, index) => <button key={index} onClick={() => item.blockId && selectBlock(item.blockId)}><strong>{item.level}</strong> {item.message}</button>)}</div></details>}
+      <div className="bottom"><span>Files are processed in your browser.</span><button className="export" disabled={!!errors || !!combinedError || combinedPending || sourcePending || exporting} onClick={() => void exportZip()}><Check size={15} /> Export workspace ZIP</button></div>
     </main>
-    <footer><span>Block Converter · TeX-first preview</span><span>Local processing · ZIP export · Math Note Editor format</span></footer>
   </div>;
 }

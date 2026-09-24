@@ -1,9 +1,13 @@
 import JSZip from 'jszip';
 import { assetOutputPath, blockMarkdown, type ConversionDraft } from './converter';
 
+export function settingsJson(draft: ConversionDraft): string {
+  return JSON.stringify({ macros: draft.macros, customCommands: Object.keys(draft.macros), textCommands: [] }, null, 2);
+}
+
 export async function makeWorkspaceArchive(draft: ConversionDraft): Promise<Blob> {
   const zip = new JSZip();
-  zip.file('setting/settings.json', JSON.stringify({ macros: draft.macros, customCommands: Object.keys(draft.macros), textCommands: [] }, null, 2));
+  zip.file('setting/settings.json', settingsJson(draft));
   for (const block of draft.blocks) {
     const filename = `${block.id}--${block.label.replace(/[^a-zA-Z0-9-]+/g, '-')}.md`;
     zip.file(filename, blockMarkdown(block));

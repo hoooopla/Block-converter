@@ -10,9 +10,11 @@
     "test": "tsx --test src/converter.test.ts"
   },
   "dependencies": {
+    "@typeward/texlive-wasm": "0.2.4-alpha",
     "jszip": "^3.10.1",
     "katex": "^0.16.22",
     "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
